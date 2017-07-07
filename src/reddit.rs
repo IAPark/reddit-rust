@@ -3,11 +3,13 @@ extern crate hyper;
 extern crate hyper_tls;
 
 extern crate tokio_core;
-extern crate serialize;
 
-use self::serialize::json;
-use std::env;
-use std::io::{self, Write};
+extern crate serde_json;
+extern crate serde_derive;
+
+use self::serde_json::{Value};
+
+use std::io;
 
 use self::futures::{Future, BoxFuture};
 use self::futures::stream::Stream;
@@ -42,17 +44,23 @@ impl Connection {
         // return an object references a subreddit
     }
 
-    pub fn get(&mut self, uri: &str) {
+    pub fn get(&self, uri: &str) -> Box<Future<Item = Value, Error = hyper::Error>> {
         let mut req = Request::new(Method::Get, uri.parse().unwrap());
         req.headers_mut().set(UserAgent::new(self.userAgent.clone()));
         
-        let work = self.client.request(req).and_then(|res| {
-            println!("Response: {}", res.status());
-
-            res.body().concat2().and_then(|result| {
-                Ok(())
+        Box::new(self.client.request(req).and_then(|res| {
+            res.body().concat2()
+        }).and_then(|body| {
+            serde_json::from_slice(&body).map_err(|e| {
+                hyper::Error::Io(io::Error::new(io::ErrorKind::Other,e))
             })
-        });
+        }))
+    }
+
+    pub fn run<F>(&mut self, future: F) -> Result<F::Item, F::Error>
+                                              where F: Future,
+    {
+        self.loop_core.run(future)
     }
 
 
